@@ -1,0 +1,256 @@
+---
+
+- name: Print out hosts architectures
+  debug:
+    msg: "ansible_architecture: {{ ansible_architecture }}"
+
+- name: Remove file previous download
+  file:
+    path: /tmp/etcd-{{ etcd_version }}-linux-{{ ansible_architecture }}.tar.gz
+    state: absent
+
+- name: Remove directory previous download extract
+  file:
+    path: /tmp/etcd-download-test
+    state: absent
+
+- name: Make directory for download extract
+  file:
+    path: /tmp/etcd-download-test
+    state: directory
+
+- name: Set 'etcd_architecture' for arm64
+  set_fact:
+    etcd_architecture: 'arm64'
+  when: ansible_architecture is search("arm64")
+
+- name: Set 'etcd_architecture' for aarch64
+  set_fact:
+    etcd_architecture: 'arm64'
+  when: ansible_architecture is search("aarch64")
+
+- name: Set 'etcd_architecture' for x86_64 (amd64)
+  set_fact:
+    etcd_architecture: 'amd64'
+  when: ansible_architecture is search("x86_64")
+
+- name: Download etcd binaries
+  get_url:
+    url: https://storage.googleapis.com/etcd/{{ etcd_version }}/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}.tar.gz
+    dest: /tmp/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}.tar.gz
+
+- name: Unarchive etcd binaries
+  unarchive:
+    src: /tmp/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}.tar.gz
+    dest: /tmp/etcd-download-test
+    remote_src: yes
+
+- name: Remove tar file download
+  file:
+    path: /tmp/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}.tar.gz
+    state: absent
+
+- name: Changing perm of "/tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ ansible_architecture }}/etcd", adding "+x"
+  file: dest=/tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcd mode=+x
+
+- name: Changing perm of "/tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ ansible_architecture }}/etcdctl", adding "+x"
+  file: dest=/tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcdctl mode=+x
+
+- name: Verify the downloads
+  shell: /tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcd --version
+  when: etcd_architecture is not search("arm64")
+
+- name: Verify the downloads
+  shell: ETCD_UNSUPPORTED_ARCH=arm64 /tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcdctl version
+  when: etcd_architecture is search("arm64")
+
+- name: Check etcd
+  stat: path=/tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcd
+  register: etcd_present
+
+- name: Check etcdctl
+  stat: path=/tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcdctl
+  register: etcdctl_present
+
+- name: Move etcd to bin
+  become: yes
+  command: mv /tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcd /usr/local/bin
+  when: etcd_present.stat.exists
+
+- name: Move etcdctl to bin
+  become: yes
+  command: mv /tmp/etcd-download-test/etcd-{{ etcd_version }}-linux-{{ etcd_architecture }}/etcdctl /usr/local/bin
+  when: etcdctl_present.stat.exists
+
+# - name: Copy etcd binaries to destination directory
+#   copy:
+#     src: "{{ etcd_download_dir }}/etcd-v{{ etcd_version }}-linux-{{ etcd_architecture }}/{{ item }}"
+#     dest: "{{ etcd_bin_dir }}/{{ item }}"
+#     mode: 0755
+#     owner: root
+#     group: root
+#     remote_src: yes
+#   with_items:
+#     - etcd
+#     - etcdctl
+#   tags:
+#     - etcd
+
+- name: Copy certificate (defined by directory) and look for individual certificates 
+  become: yes
+  copy:
+    src: "{{ etcd_server_dir }}/{{ item }}"
+    dest: "server.pem"
+  with_items:
+    - "{{ hostname }}.pem"
+  when: etcd_server is not defined and etcd_server_dir is defined
+
+- name: Copy certificate key (defined by directory) and look for individual certificates 
+  become: yes
+  copy:
+    src: "{{ etcd_server_dir }}/{{ item }}"
+    dest: "server-key.pem"
+  with_items:
+    - "{{ hostname }}-key.pem"
+  when: etcd_server is not defined and etcd_server_dir is defined
+
+- name: Copy certificates (defined by file) and look for a single certificate
+  become: yes
+  copy:
+    src: "{{ item }}"
+    dest: "server.pem"
+  with_items:
+    - "{{ etcd_server }}.pem"
+  when: etcd_server is defined and etcd_server_dir is not defined
+
+- name: Copy certificates (defined by file) and look for a single certificate
+  become: yes
+  copy:
+    src: "{{ item }}"
+    dest: "server-key.pem"
+  with_items:
+    - "{{ etcd_server }}-key.pem"
+  when: etcd_server is defined and etcd_server_dir is not defined
+
+- name: Copy certificates authority
+  become: yes
+  copy:
+    src: "{{ item }}"
+    dest: "ca.pem"
+  with_items:
+    - "{{ etcd_ca }}.pem"
+
+- name: Make directory for configs and certs
+  become: yes
+  file:
+    path: /etc/etcd
+    state: directory
+
+- name: Move ca certificate to "/etc/etcd/etcd-ca.crt"
+  become: yes
+  command: mv "ca.pem" /etc/etcd/etcd-ca.crt
+
+- name: Move server certificate to "/etc/etcd/server.crt"
+  become: yes
+  command: mv "server.pem" /etc/etcd/server.crt
+
+- name: Move server certificate key to "/etc/etcd/server.key"
+  become: yes
+  command: mv "server-key.pem" /etc/etcd/server.key
+
+- name: Set perms for etcd-ca.crt
+  become: yes
+  file:
+    path: /etc/etcd/etcd-ca.crt
+    state: file
+    mode: 600
+
+- name: Create config from template for arm64
+  become: yes
+  template:
+    src: ../templates/etcd_config_arm64.j2
+    dest: /etc/etcd/etcd.conf
+  when: etcd_architecture is search("arm64")
+
+- name: Create config from template for not arm64
+  become: yes
+  template:
+    src: ../templates/etcd_config.j2
+    dest: /etc/etcd/etcd.conf
+  when: etcd_architecture is not search("arm64")
+
+- name: Create service from template
+  become: yes
+  template:
+    src: ../templates/etcd_service.j2
+    dest: /lib/systemd/system/etcd.service
+
+# - name: Combine etcd_settings and etcd_settings_user (if defined)
+#   set_fact:
+#     etcd_settings: "{{ etcd_settings | combine(etcd_settings_user|default({})) }}"
+#   tags:
+#     - etcd
+#     - etcd-systemd
+
+# - name: Create systemd unit file
+#   template:
+#     src: etc/systemd/system/etcd.service.j2
+#     dest: /etc/systemd/system/etcd.service
+#     owner: root
+#     group: root
+#     mode: 0644
+#   notify:
+#     - reload systemd
+#   tags:
+#     - etcd
+#     - etcd-systemd
+
+# - name: Stop etcd
+#   service:
+#     name: etcd
+#     daemon_reload: yes
+#     enabled: yes
+#     state: stopped
+
+- name: Make sure directory for data exists
+  become: yes
+  file:
+    path: /var/lib/etcd
+    state: directory
+
+- name: Enable and start etcd
+  become: yes
+  service:
+    name: etcd
+    daemon_reload: yes
+    enabled: yes
+    state: started
+
+- name: Run "etcdctl member list" and register the results
+  become: yes
+  shell: |
+    ETCDCTL_API=3 etcdctl member list \
+        --endpoints=https://{{ hostvars[inventory_hostname]['ansible_' + etcd_interface].ipv4.address }}:2379 \
+        --cacert=/etc/etcd/etcd-ca.crt \
+        --cert=/etc/etcd/server.crt \
+        --key=/etc/etcd/server.key
+  register: members
+
+- name: Output the registered results of "etcdctl member list"
+  debug: var=members.stdout_lines
+
+- name: Run "etcdctl endpoint health" and register the results
+  become: yes
+  shell: |
+    ETCDCTL_API=3 etcdctl endpoint health \
+        --endpoints="{% for host in vars['play_hosts'] %}https://{{ hostvars[host]['ansible_' + etcd_interface].ipv4.address }}:2379{% if not loop.last %},{% endif %}{% endfor %}"
+        --cacert=/etc/etcd/etcd-ca.crt \
+        --cert=/etc/etcd/server.crt \
+        --key=/etc/etcd/server.key
+  register: health
+
+- name: Output the registered results of "etcdctl endpoint health"
+  debug: var=health.stdout_lines
+
+
+
