@@ -1,0 +1,6 @@
+---
+
+etcd_version: v3.4.14
+download_url: https://storage.googleapis.com/etcd
+
+etcd_interface: eno1
