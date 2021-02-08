@@ -25,8 +25,18 @@ Including an example of how to use your role (for instance, with variables passe
 
     - hosts: servers
       roles:
-         - { role: username.rolename, x: 42 }
 
+      - name: database/etcd
+          vars:
+            # Defined by directory (look for individual server certificates)
+            etcd_server_dir: /path/to/tls/certificates
+
+            # or
+
+            # Defined by file (look for a single server certificate)
+            etcd_server: /path/to/tls/certificates
+            etcd_ca: /path/to/tls/certificates
+            etcd_interface: ens5
 
 https://thenewstack.io/tutorial-set-up-a-secure-and-highly-available-etcd-cluster/
 
