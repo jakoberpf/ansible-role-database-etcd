@@ -102,7 +102,7 @@
     src: "{{ etcd_server_dir }}/{{ item }}"
     dest: "server.pem"
   with_items:
-    - "{{ hostname }}.pem"
+    - "{{ inventory_hostname }}.pem"
   when: etcd_server is not defined and etcd_server_dir is defined and etcd_tls
   register: etcd_tls_certs_found
 
@@ -112,7 +112,7 @@
     src: "{{ etcd_server_dir }}/{{ item }}"
     dest: "server-key.pem"
   with_items:
-    - "{{ hostname }}-key.pem"
+    - "{{ inventory_hostname }}-key.pem"
   when: etcd_server is not defined and etcd_server_dir is defined and etcd_tls
   register: etcd_tls_certs_found
 
