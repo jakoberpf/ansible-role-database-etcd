@@ -102,8 +102,9 @@
     src: "{{ etcd_server_dir }}/{{ item }}"
     dest: "server.pem"
   with_items:
-    - "{{ hostname }}.pem"
-  when: etcd_server is not defined and etcd_server_dir is defined
+    - "{{ inventory_hostname }}.pem"
+  when: etcd_server is not defined and etcd_server_dir is defined and etcd_tls
+  register: etcd_tls_certs_found
 
 - name: Copy certificate key (defined by directory) and look for individual certificates 
   become: yes
@@ -111,8 +112,9 @@
     src: "{{ etcd_server_dir }}/{{ item }}"
     dest: "server-key.pem"
   with_items:
-    - "{{ hostname }}-key.pem"
-  when: etcd_server is not defined and etcd_server_dir is defined
+    - "{{ inventory_hostname }}-key.pem"
+  when: etcd_server is not defined and etcd_server_dir is defined and etcd_tls
+  register: etcd_tls_certs_found
 
 - name: Copy certificates (defined by file) and look for a single certificate
   become: yes
@@ -121,7 +123,8 @@
     dest: "server.pem"
   with_items:
     - "{{ etcd_server }}.pem"
-  when: etcd_server is defined and etcd_server_dir is not defined
+  when: etcd_server is defined and etcd_server_dir is not defined and etcd_tls
+  register: etcd_tls_certs_found
 
 - name: Copy certificates (defined by file) and look for a single certificate
   become: yes
@@ -130,7 +133,8 @@
     dest: "server-key.pem"
   with_items:
     - "{{ etcd_server }}-key.pem"
-  when: etcd_server is defined and etcd_server_dir is not defined
+  when: etcd_server is defined and etcd_server_dir is not defined and etcd_tls
+  register: etcd_tls_certs_found
 
 - name: Copy certificates authority
   become: yes
@@ -139,8 +143,9 @@
     dest: "ca.pem"
   with_items:
     - "{{ etcd_ca }}.pem"
+  when: etcd_tls
 
-- name: Make directory for configs and certs
+- name: Make directory for configs and etcd_tls certificates
   become: yes
   file:
     path: /etc/etcd
@@ -149,14 +154,17 @@
 - name: Move ca certificate to "/etc/etcd/etcd-ca.crt"
   become: yes
   command: mv "ca.pem" /etc/etcd/etcd-ca.crt
+  when: etcd_tls
 
 - name: Move server certificate to "/etc/etcd/server.crt"
   become: yes
   command: mv "server.pem" /etc/etcd/server.crt
+  when: etcd_tls
 
 - name: Move server certificate key to "/etc/etcd/server.key"
   become: yes
   command: mv "server-key.pem" /etc/etcd/server.key
+  when: etcd_tls
 
 - name: Set perms for etcd-ca.crt
   become: yes
@@ -164,20 +172,35 @@
     path: /etc/etcd/etcd-ca.crt
     state: file
     mode: 600
+  when: etcd_tls
 
 - name: Create config from template for arm64
   become: yes
   template:
     src: ../templates/etcd_config_arm64.j2
     dest: /etc/etcd/etcd.conf
-  when: etcd_architecture is search("arm64")
+  when: etcd_architecture is search("arm64") and etcd_tls
 
 - name: Create config from template for not arm64
   become: yes
   template:
     src: ../templates/etcd_config.j2
     dest: /etc/etcd/etcd.conf
-  when: etcd_architecture is not search("arm64")
+  when: etcd_architecture is not search("arm64") and etcd_tls
+
+- name: Create noca config from template for arm64
+  become: yes
+  template:
+    src: ../templates/etcd_config_arm64_notls.j2
+    dest: /etc/etcd/etcd.conf
+  when: etcd_architecture is search("arm64") and not etcd_tls
+
+- name: Create noca config from template for not arm64
+  become: yes
+  template:
+    src: ../templates/etcd_config_notls.j2
+    dest: /etc/etcd/etcd.conf
+  when: etcd_architecture is not search("arm64") and not etcd_tls
 
 - name: Create service from template
   become: yes
@@ -226,7 +249,7 @@
     enabled: yes
     state: started
 
-- name: Run "etcdctl member list" and register the results
+- name: Run "etcdctl member list" with etcd_tls and register the results
   become: yes
   shell: |
     ETCDCTL_API=3 etcdctl member list \
@@ -235,11 +258,9 @@
         --cert=/etc/etcd/server.crt \
         --key=/etc/etcd/server.key
   register: members
+  when: etcd_tls
 
-- name: Output the registered results of "etcdctl member list"
-  debug: var=members.stdout_lines
-
-- name: Run "etcdctl endpoint health" and register the results
+- name: Run "etcdctl endpoint health" with etcd_tls and register the results
   become: yes
   shell: |
     ETCDCTL_API=3 etcdctl endpoint health \
@@ -248,6 +269,26 @@
         --cert=/etc/etcd/server.crt \
         --key=/etc/etcd/server.key
   register: health
+  when: etcd_tls
+
+- name: Run "etcdctl member list" without etcd_tls and register the results
+  become: yes
+  shell: |
+    ETCDCTL_API=3 etcdctl member list \
+        --endpoints=https://{{ hostvars[inventory_hostname]['ansible_' + etcd_interface].ipv4.address }}:2379
+  register: members
+  when: not etcd_tls
+
+- name: Run "etcdctl endpoint health" without etcd_tls and register the results
+  become: yes
+  shell: |
+    ETCDCTL_API=3 etcdctl endpoint health \
+        --endpoints="{% for host in vars['play_hosts'] %}https://{{ hostvars[host]['ansible_' + etcd_interface].ipv4.address }}:2379{% if not loop.last %},{% endif %}{% endfor %}"
+  register: health
+  when: not etcd_tls
+
+- name: Output the registered results of "etcdctl member list"
+  debug: var=members.stdout_lines
 
 - name: Output the registered results of "etcdctl endpoint health"
   debug: var=health.stdout_lines
