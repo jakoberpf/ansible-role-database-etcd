@@ -275,7 +275,7 @@
   become: yes
   shell: |
     ETCDCTL_API=3 etcdctl member list \
-        --endpoints=https://{{ hostvars[inventory_hostname]['ansible_' + etcd_interface].ipv4.address }}:2379
+        --endpoints=http://{{ hostvars[inventory_hostname]['ansible_' + etcd_interface].ipv4.address }}:2379
   register: members
   when: not etcd_tls
 
@@ -283,7 +283,7 @@
   become: yes
   shell: |
     ETCDCTL_API=3 etcdctl endpoint health \
-        --endpoints="{% for host in vars['play_hosts'] %}https://{{ hostvars[host]['ansible_' + etcd_interface].ipv4.address }}:2379{% if not loop.last %},{% endif %}{% endfor %}"
+        --endpoints="{% for host in vars['play_hosts'] %}http://{{ hostvars[host]['ansible_' + etcd_interface].ipv4.address }}:2379{% if not loop.last %},{% endif %}{% endfor %}"
   register: health
   when: not etcd_tls
 
